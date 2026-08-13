@@ -36,7 +36,13 @@ const defaultConfig: AdminConfig = {
 
 function loadConfig(): AdminConfig {
   try {
-    return { ...defaultConfig, ...JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}") };
+    const saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}") as Partial<AdminConfig>;
+    const config = { ...defaultConfig, ...saved };
+    if (!config.apiUrl || config.apiUrl.startsWith("/")) {
+      config.apiUrl = defaultConfig.apiUrl;
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+    }
+    return config;
   } catch {
     return defaultConfig;
   }
@@ -191,8 +197,18 @@ function App() {
         }),
       });
 
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.error || "分析接口返回失败");
+      const responseText = await response.text();
+      let payload: { analysis?: ManualAnalysis; error?: string } = {};
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        if (response.status === 504) {
+          throw new Error("分析时间超过服务器限制，请稍后重试；系统已保留本地提取文本。");
+        }
+        throw new Error(`分析服务返回异常（HTTP ${response.status || "未知"}），请稍后重试。`);
+      }
+      if (!response.ok) throw new Error(payload.error || `分析接口返回失败（HTTP ${response.status}）`);
+      if (!payload.analysis) throw new Error("分析服务未返回报告内容，请重试。");
 
       setAnalysis(payload.analysis);
       setMarkdown(analysisToMarkdown(payload.analysis));
