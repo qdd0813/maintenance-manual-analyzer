@@ -142,6 +142,8 @@ async function getBody(request: VercelRequest): Promise<AnalyzeBody> {
 
 async function handler(request: VercelRequest, response: VercelResponse) {
   setCors(response);
+  const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
 
   if (request.method === "OPTIONS") {
     response.status(204).end();
@@ -164,6 +166,14 @@ async function handler(request: VercelRequest, response: VercelResponse) {
     const sourceName = normalizeString(body.sourceName) || "未命名PDF";
     const pageCount = Number(body.pageCount) || 0;
     const extractedText = normalizeString(body.extractedText);
+
+    console.log("[analyze] request started", {
+      requestId,
+      sourceName,
+      pageCount,
+      textLength: extractedText.length,
+      model: normalizeString(body.model) || "deepseek-v4-flash",
+    });
 
     if (!extractedText || extractedText.length < 30) {
       response.status(400).json({ error: "PDF 文本过短，请先完成 OCR 或检查文件" });
@@ -192,10 +202,17 @@ async function handler(request: VercelRequest, response: VercelResponse) {
         temperature: 0.1,
         thinking: { type: "disabled" },
       }),
+      signal: AbortSignal.timeout(270_000),
     });
 
     const payload = await deepseekResponse.json();
     if (!deepseekResponse.ok) {
+      console.error("[analyze] DeepSeek request failed", {
+        requestId,
+        status: deepseekResponse.status,
+        message: payload?.error?.message,
+        durationMs: Date.now() - startedAt,
+      });
       response.status(deepseekResponse.status).json({
         error: payload?.error?.message || "DeepSeek API 调用失败",
       });
@@ -209,10 +226,27 @@ async function handler(request: VercelRequest, response: VercelResponse) {
     }
 
     const analysis = normalizeAnalysis(parseJsonContent(content), { ...body, sourceName, pageCount });
+    console.log("[analyze] request completed", {
+      requestId,
+      durationMs: Date.now() - startedAt,
+      toolMaterials: analysis.toolMaterials.length,
+      expendableParts: analysis.expendableParts.length,
+      referencedInformation: analysis.referencedInformation.length,
+    });
     response.status(200).json({ analysis });
   } catch (error) {
+    console.error("[analyze] request crashed", {
+      requestId,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    });
     response.status(500).json({
-      error: error instanceof Error ? error.message : "分析失败",
+      error:
+        error instanceof Error && error.name === "TimeoutError"
+          ? "模型分析超时，请稍后重试"
+          : error instanceof Error
+            ? error.message
+            : "分析失败",
       analysis: emptyAnalysis,
     });
   }
