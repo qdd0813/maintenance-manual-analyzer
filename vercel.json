@@ -1,10 +1,12 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
+  "fluid": true,
   "buildCommand": "pnpm vercel-build",
   "outputDirectory": ".",
   "functions": {
     "api/analyze.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     }
   },
   "headers": [
