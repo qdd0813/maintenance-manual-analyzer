@@ -34,12 +34,5 @@
     "typescript": "^5",
     "typescript-eslint": "^8.67.0"
   },
-  "packageManager": "pnpm@11.19.0",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "core-js",
-      "esbuild",
-      "tesseract.js"
-    ]
-  }
+  "packageManager": "pnpm@11.19.0"
 }
