@@ -1,6 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-
-const { jsonrepair } = require("jsonrepair") as typeof import("jsonrepair");
+import { jsonrepair } from "jsonrepair";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
