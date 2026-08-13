@@ -1,0 +1,6 @@
+allowBuilds:
+  core-js: set this to true or false
+  esbuild: true
+  sharp: false
+  tesseract.js: set this to true or false
+  unrs-resolver: false
