@@ -28,7 +28,7 @@ const CONFIG_KEY = "mma-admin-config-v1";
 const PASSWORD_KEY = "mma-admin-password-sha256";
 
 const defaultConfig: AdminConfig = {
-  apiUrl: "/api/analyze",
+  apiUrl: "https://maintenance-manual-analyzer.vercel.app/api/analyze",
   model: "deepseek-v4-flash",
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   promptTemplate: DEFAULT_USER_PROMPT_TEMPLATE,
