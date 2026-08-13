@@ -140,7 +140,7 @@ async function getBody(request: VercelRequest): Promise<AnalyzeBody> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
-async function handler(request: VercelRequest, response: VercelResponse) {
+export default async function handler(request: VercelRequest, response: VercelResponse) {
   setCors(response);
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
@@ -251,5 +251,3 @@ async function handler(request: VercelRequest, response: VercelResponse) {
     });
   }
 }
-
-module.exports = handler;
