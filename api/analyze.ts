@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { jsonrepair } from "jsonrepair";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
+const DEFAULT_WORK_PASSWORD_HASH = "523dc622561e451bc7deabab56efb3524517b607043fd4d921039e1c55470235";
 
 const DEFAULT_SYSTEM_PROMPT = `你是一名严谨的航空维修资料分析员。你必须只依据用户提供的维修手册文本进行判断，不得编造。
 
@@ -35,6 +36,8 @@ type AnalyzeBody = {
   model?: string;
   systemPrompt?: string;
   promptTemplate?: string;
+  workPassword?: string;
+  verifyPassword?: boolean;
 };
 
 function setCors(response: VercelResponse) {
@@ -45,6 +48,13 @@ function setCors(response: VercelResponse) {
 
 function normalizeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function normalizeRequirement(value: unknown) {
@@ -155,13 +165,23 @@ export default async function handler(request: VercelRequest, response: VercelRe
   }
 
   try {
+    const body = await getBody(request);
+    const expectedPasswordHash = process.env.ANALYSIS_PASSWORD_SHA256 || DEFAULT_WORK_PASSWORD_HASH;
+    if ((await sha256(normalizeString(body.workPassword))) !== expectedPasswordHash) {
+      response.status(401).json({ error: "工作密码错误" });
+      return;
+    }
+    if (body.verifyPassword) {
+      response.status(204).end();
+      return;
+    }
+
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
       response.status(500).json({ error: "后端缺少 DEEPSEEK_API_KEY 环境变量" });
       return;
     }
 
-    const body = await getBody(request);
     const sourceName = normalizeString(body.sourceName) || "未命名PDF";
     const pageCount = Number(body.pageCount) || 0;
     const extractedText = normalizeString(body.extractedText);
