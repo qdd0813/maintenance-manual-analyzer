@@ -26,7 +26,13 @@ type AdminConfig = {
 
 const CONFIG_KEY = "mma-admin-config-v1";
 const PASSWORD_KEY = "mma-admin-password-sha256";
-const PRODUCTION_API_URL = "https://api.qdddd.cc/api/analyze";
+const SAME_ORIGIN_API =
+  window.location.hostname === "qdddd.cc" ||
+  window.location.hostname.endsWith(".qdddd.cc") ||
+  window.location.hostname.endsWith(".vercel.app");
+const PRODUCTION_API_URL = SAME_ORIGIN_API
+  ? new URL("/api/analyze", window.location.origin).href
+  : "https://api.qdddd.cc/api/analyze";
 const OCR_ASSET_ROOT = new URL(`${import.meta.env.BASE_URL}ocr/`, window.location.href);
 
 const defaultConfig: AdminConfig = {
@@ -45,7 +51,9 @@ function loadConfig(): AdminConfig {
     let usesUnsafeProductionApi = false;
     try {
       const parsedApiUrl = new URL(apiUrl);
-      usesLegacyApi = parsedApiUrl.hostname === "maintenance-manual-analyzer.vercel.app";
+      usesLegacyApi =
+        parsedApiUrl.hostname === "maintenance-manual-analyzer.vercel.app" ||
+        (SAME_ORIGIN_API && parsedApiUrl.hostname === "api.qdddd.cc");
       const productionPage = !["localhost", "127.0.0.1"].includes(window.location.hostname);
       usesUnsafeProductionApi =
         productionPage &&
