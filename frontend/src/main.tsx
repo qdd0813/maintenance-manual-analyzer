@@ -130,7 +130,7 @@ async function extractPdf(file: File, onStatus: (status: Status) => void) {
 
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
-      await page.render({ canvas, canvasContext: context, viewport }).promise;
+      await page.render({ canvasContext: context, viewport }).promise;
       const result = await worker.recognize(canvas);
       ocrPages.push(`===== PAGE ${pageIndex} =====\n${result.data.text.trim()}`);
     }
@@ -154,6 +154,9 @@ function App() {
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [workPasswordOpen, setWorkPasswordOpen] = useState(false);
+  const [workPassword, setWorkPassword] = useState("");
+  const [workPasswordError, setWorkPasswordError] = useState("");
   const reportRef = useRef<HTMLDivElement>(null);
 
   const hasResult = analysis.toolMaterials.length + analysis.expendableParts.length + analysis.referencedInformation.length > 0;
@@ -190,11 +193,19 @@ function App() {
     saveConfig(defaultConfig);
   };
 
-  const runAnalysis = async () => {
+  const requestAnalysis = () => {
     if (!file) {
       setError("请先上传 PDF 文件。");
       return;
     }
+
+    setError("");
+    setWorkPasswordError("");
+    setWorkPasswordOpen(true);
+  };
+
+  const runAnalysis = async (submittedPassword: string) => {
+    if (!file) return;
 
     setError("");
     setAnalysis(emptyAnalysis);
@@ -222,6 +233,7 @@ function App() {
             model: config.model,
             systemPrompt: config.systemPrompt,
             promptTemplate: config.promptTemplate,
+            workPassword: submittedPassword,
           }),
           signal: controller.signal,
         });
@@ -239,6 +251,12 @@ function App() {
         }
         throw new Error(`分析服务返回异常（HTTP ${response.status || "未知"}），请稍后重试。`);
       }
+      if (response.status === 401) {
+        setWorkPassword("");
+        setWorkPasswordError("工作密码不正确，请重新输入。");
+        setWorkPasswordOpen(true);
+        throw new Error(payload.error || "工作密码错误");
+      }
       if (!response.ok) throw new Error(payload.error || `分析接口返回失败（HTTP ${response.status}）`);
       if (!payload.analysis) throw new Error("分析服务未返回报告内容，请重试。");
 
@@ -255,6 +273,35 @@ function App() {
       } else {
         setError(`${failureStage}失败：${message}`);
       }
+    }
+  };
+
+  const submitWorkPassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const submittedPassword = workPassword.trim();
+    if (!submittedPassword) {
+      setWorkPasswordError("请输入工作密码。");
+      return;
+    }
+
+    setWorkPasswordError("");
+    try {
+      const response = await fetch(config.apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ verifyPassword: true, workPassword: submittedPassword }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        setWorkPasswordError(response.status === 401 ? "工作密码不正确，请重新输入。" : payload.error || "密码验证失败，请重试。");
+        return;
+      }
+
+      setWorkPasswordOpen(false);
+      await runAnalysis(submittedPassword);
+      setWorkPassword("");
+    } catch {
+      setWorkPasswordError("密码验证服务暂时无法连接，请检查网络后重试。");
     }
   };
 
@@ -350,23 +397,13 @@ function App() {
             <small>支持文字版与扫描版维修手册</small>
           </label>
 
-          <div className="field">
-            <label>后端接口地址</label>
-            <input
-              value={config.apiUrl}
-              readOnly
-              placeholder="https://api.example.com/api/analyze"
-              title="接口地址仅可在后台设置中修改"
-            />
-          </div>
-
           <div className="progressBar" aria-label="进度">
             <span style={{ width: `${Math.round(status.progress * 100)}%` }} />
           </div>
           <p className="hint">{status.message}</p>
           {error ? <div className="error panelError">{error}</div> : null}
 
-          <button className="primaryButton" disabled={!file || status.stage === "extracting" || status.stage === "ocr" || status.stage === "analyzing"} onClick={runAnalysis}>
+          <button className="primaryButton" disabled={!file || status.stage === "extracting" || status.stage === "ocr" || status.stage === "analyzing"} onClick={requestAnalysis}>
             {status.stage === "analyzing" || status.stage === "ocr" || status.stage === "extracting" ? "处理中…" : "开始分析"}
           </button>
 
@@ -375,6 +412,33 @@ function App() {
           </button>
         </aside>
       </section>
+
+      {workPasswordOpen ? (
+        <div className="dialogBackdrop" role="presentation">
+          <section className="workPasswordDialog" role="dialog" aria-modal="true" aria-labelledby="work-password-title">
+            <p className="eyebrow">Secure Analysis</p>
+            <h2 id="work-password-title">输入工作密码</h2>
+            <p className="dialogDescription">验证通过后才会连接分析服务。</p>
+            <form onSubmit={submitWorkPassword}>
+              <label className="field">
+                <span>工作密码</span>
+                <input
+                  autoFocus
+                  autoComplete="current-password"
+                  type="password"
+                  value={workPassword}
+                  onChange={(event) => setWorkPassword(event.target.value)}
+                />
+              </label>
+              {workPasswordError ? <div className="error">{workPasswordError}</div> : null}
+              <div className="dialogActions">
+                <button type="button" className="ghostButton" onClick={() => setWorkPasswordOpen(false)}>取消</button>
+                <button type="submit" className="primaryButton">确认并分析</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
 
       {adminOpen ? (
         <section className="adminPanel">

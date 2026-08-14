@@ -367,6 +367,48 @@ body {
   line-height: 1.55;
 }
 
+.dialogBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(24, 29, 40, 0.48);
+  backdrop-filter: blur(12px);
+}
+
+.workPasswordDialog {
+  width: min(440px, 100%);
+  border: 1px solid rgba(167, 132, 79, 0.24);
+  border-radius: 28px;
+  padding: 30px;
+  background: rgba(255, 253, 248, 0.98);
+  box-shadow: 0 30px 90px rgba(20, 25, 36, 0.28);
+}
+
+.workPasswordDialog h2 {
+  margin: 8px 0 10px;
+  color: #222838;
+  font-size: 28px;
+}
+
+.dialogDescription {
+  margin: 0 0 22px;
+  color: #777064;
+}
+
+.dialogActions {
+  display: grid;
+  grid-template-columns: 1fr 1.35fr;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.dialogActions button {
+  margin: 0;
+}
+
 .adminPanel,
 .reportHead,
 .section {
