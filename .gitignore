@@ -21,6 +21,7 @@
 /build
 /dist
 /output
+/public/ocr
 /tmp
 
 # misc

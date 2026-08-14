@@ -8,6 +8,7 @@ export default tseslint.config(
       ".next/**",
       "dist/**",
       "output/**",
+      "public/ocr/**",
       "tmp/**",
       "node_modules/**",
       "build/**",
