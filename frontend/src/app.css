@@ -84,6 +84,22 @@ body {
   line-height: 1.85;
 }
 
+.reviewNotice {
+  width: fit-content;
+  max-width: 690px;
+  margin: 20px 0 0;
+  padding: 11px 15px;
+  border: 1px solid rgba(174, 127, 61, 0.24);
+  border-radius: 14px;
+  background: rgba(255, 248, 235, 0.72);
+  color: #76552d;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.6;
+  box-shadow: 0 12px 30px rgba(95, 74, 45, 0.07);
+  backdrop-filter: blur(16px);
+}
+
 .heroBadges {
   display: flex;
   flex-wrap: wrap;
