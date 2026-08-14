@@ -27,9 +27,7 @@ type AdminConfig = {
 const CONFIG_KEY = "mma-admin-config-v1";
 const PASSWORD_KEY = "mma-admin-password-sha256";
 const PRODUCTION_API_URL = "https://api.qdddd.cc/api/analyze";
-const LEGACY_API_URLS = new Set([
-  "https://maintenance-manual-analyzer.vercel.app/api/analyze",
-]);
+const OCR_ASSET_ROOT = new URL(`${import.meta.env.BASE_URL}ocr/`, window.location.href);
 
 const defaultConfig: AdminConfig = {
   apiUrl: PRODUCTION_API_URL,
@@ -42,8 +40,24 @@ function loadConfig(): AdminConfig {
   try {
     const saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}") as Partial<AdminConfig>;
     const config = { ...defaultConfig, ...saved };
-    if (!config.apiUrl || config.apiUrl.startsWith("/") || LEGACY_API_URLS.has(config.apiUrl.replace(/\/+$/, ""))) {
+    const apiUrl = config.apiUrl?.trim() || "";
+    let usesLegacyApi = false;
+    let usesUnsafeProductionApi = false;
+    try {
+      const parsedApiUrl = new URL(apiUrl);
+      usesLegacyApi = parsedApiUrl.hostname === "maintenance-manual-analyzer.vercel.app";
+      const productionPage = !["localhost", "127.0.0.1"].includes(window.location.hostname);
+      usesUnsafeProductionApi =
+        productionPage &&
+        (parsedApiUrl.protocol !== "https:" || ["localhost", "127.0.0.1", "0.0.0.0"].includes(parsedApiUrl.hostname));
+    } catch {
+      usesLegacyApi = true;
+    }
+    if (!apiUrl || apiUrl.startsWith("/") || usesLegacyApi || usesUnsafeProductionApi) {
       config.apiUrl = defaultConfig.apiUrl;
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+    } else if (apiUrl !== config.apiUrl) {
+      config.apiUrl = apiUrl;
       localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
     }
     return config;
@@ -95,7 +109,11 @@ async function extractPdf(file: File, onStatus: (status: Status) => void) {
     return { text, pageCount: document.numPages, mode: "PDF文字层" };
   }
 
-  const worker = await createWorker("eng");
+  const worker = await createWorker("eng", 1, {
+    workerPath: new URL("worker.min.js", OCR_ASSET_ROOT).href,
+    corePath: new URL("core", OCR_ASSET_ROOT).href,
+    langPath: new URL("lang", OCR_ASSET_ROOT).href,
+  });
   const ocrPages: string[] = [];
   try {
     for (let pageIndex = 1; pageIndex <= document.numPages; pageIndex += 1) {
@@ -182,24 +200,34 @@ function App() {
     setAnalysis(emptyAnalysis);
     setMarkdown("");
 
+    let failureStage = "PDF 读取";
     try {
       const extracted = await extractPdf(file, setStatus);
       setExtractedText(extracted.text);
       setExtractMode(extracted.mode);
 
+      failureStage = "后端分析";
       setStatus({ stage: "analyzing", message: "正在生成分析报告，请稍等…", progress: 0.95 });
-      const response = await fetch(config.apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceName: file.name,
-          pageCount: extracted.pageCount,
-          extractedText: extracted.text,
-          model: config.model,
-          systemPrompt: config.systemPrompt,
-          promptTemplate: config.promptTemplate,
-        }),
-      });
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 285_000);
+      let response: Response;
+      try {
+        response = await fetch(config.apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceName: file.name,
+            pageCount: extracted.pageCount,
+            extractedText: extracted.text,
+            model: config.model,
+            systemPrompt: config.systemPrompt,
+            promptTemplate: config.promptTemplate,
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        window.clearTimeout(timeout);
+      }
 
       const responseText = await response.text();
       let payload: { analysis?: ManualAnalysis; error?: string } = {};
@@ -219,7 +247,14 @@ function App() {
       setStatus({ stage: "done", message: "分析完成，可以预览或下载 PDF。", progress: 1 });
     } catch (caught) {
       setStatus({ stage: "error", message: "分析失败", progress: 0 });
-      setError(caught instanceof Error ? caught.message : "未知错误");
+      const message = caught instanceof Error ? caught.message : "未知错误";
+      if (caught instanceof DOMException && caught.name === "AbortError") {
+        setError(`${failureStage}超时，请检查网络后重试。`);
+      } else if (/failed to fetch|load failed|networkerror|network request failed/i.test(message)) {
+        setError(`${failureStage}失败：网络资源无法加载。请刷新页面后重试；若仍失败，请记录此提示。`);
+      } else {
+        setError(`${failureStage}失败：${message}`);
+      }
     }
   };
 
@@ -319,8 +354,9 @@ function App() {
             <label>后端接口地址</label>
             <input
               value={config.apiUrl}
-              onChange={(event) => saveConfig({ ...config, apiUrl: event.target.value })}
+              readOnly
               placeholder="https://api.example.com/api/analyze"
+              title="接口地址仅可在后台设置中修改"
             />
           </div>
 
