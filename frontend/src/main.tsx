@@ -26,9 +26,13 @@ type AdminConfig = {
 
 const CONFIG_KEY = "mma-admin-config-v1";
 const PASSWORD_KEY = "mma-admin-password-sha256";
+const PRODUCTION_API_URL = "https://api.qdddd.cc/api/analyze";
+const LEGACY_API_URLS = new Set([
+  "https://maintenance-manual-analyzer.vercel.app/api/analyze",
+]);
 
 const defaultConfig: AdminConfig = {
-  apiUrl: "https://maintenance-manual-analyzer.vercel.app/api/analyze",
+  apiUrl: PRODUCTION_API_URL,
   model: "deepseek-v4-flash",
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   promptTemplate: DEFAULT_USER_PROMPT_TEMPLATE,
@@ -38,7 +42,7 @@ function loadConfig(): AdminConfig {
   try {
     const saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}") as Partial<AdminConfig>;
     const config = { ...defaultConfig, ...saved };
-    if (!config.apiUrl || config.apiUrl.startsWith("/")) {
+    if (!config.apiUrl || config.apiUrl.startsWith("/") || LEGACY_API_URLS.has(config.apiUrl.replace(/\/+$/, ""))) {
       config.apiUrl = defaultConfig.apiUrl;
       localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
     }
@@ -272,6 +276,9 @@ function App() {
           <p className="lead">
             上传 PDF，自动识别工具、耗材、消耗件与参考资料，逐项标注“必须/视情”和原文判断依据，最后生成可下载的中文报告。
           </p>
+          <p className="reviewNotice" role="note">
+            所有输出结果仅供参考，仍需人工核对确认。
+          </p>
           <div className="heroBadges">
             <span>本地识别扫描件</span>
             <span>依据原文判断</span>
@@ -313,7 +320,7 @@ function App() {
             <input
               value={config.apiUrl}
               onChange={(event) => saveConfig({ ...config, apiUrl: event.target.value })}
-              placeholder="https://你的-vercel-项目.vercel.app/api/analyze"
+              placeholder="https://api.example.com/api/analyze"
             />
           </div>
 
@@ -360,7 +367,7 @@ function App() {
                 <input value={config.model} onChange={(event) => saveConfig({ ...config, model: event.target.value })} />
               </label>
               <label className="field">
-                <span>Vercel API 地址</span>
+                <span>后端 API 地址</span>
                 <input value={config.apiUrl} onChange={(event) => saveConfig({ ...config, apiUrl: event.target.value })} />
               </label>
               <label className="field wide">
