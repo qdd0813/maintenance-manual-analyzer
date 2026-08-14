@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 import { createWorker } from "tesseract.js";
 import { analysisToMarkdown, emptyAnalysis, type ManualAnalysis } from "./report";
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from "../../shared/prompt";
@@ -364,6 +364,7 @@ function App() {
             <span style={{ width: `${Math.round(status.progress * 100)}%` }} />
           </div>
           <p className="hint">{status.message}</p>
+          {error ? <div className="error panelError">{error}</div> : null}
 
           <button className="primaryButton" disabled={!file || status.stage === "extracting" || status.stage === "ocr" || status.stage === "analyzing"} onClick={runAnalysis}>
             {status.stage === "analyzing" || status.stage === "ocr" || status.stage === "extracting" ? "处理中…" : "开始分析"}
@@ -374,8 +375,6 @@ function App() {
           </button>
         </aside>
       </section>
-
-      {error ? <div className="error">{error}</div> : null}
 
       {adminOpen ? (
         <section className="adminPanel">
