@@ -8,7 +8,7 @@
     "prebuild": "node scripts/prepare-ocr-assets.mjs",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "vercel-build": "echo Vercel serverless API ready",
+    "vercel-build": "pnpm build",
     "lint": "eslint .",
     "self-check": "node scripts/self-check.mjs",
     "check:pdf-text": "node scripts/check-pdf-text.mjs"

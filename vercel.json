@@ -3,7 +3,7 @@
   "version": 2,
   "fluid": true,
   "buildCommand": "pnpm vercel-build",
-  "outputDirectory": ".",
+  "outputDirectory": "dist",
   "functions": {
     "api/analyze.ts": {
       "maxDuration": 300
