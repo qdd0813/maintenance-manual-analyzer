@@ -11,6 +11,7 @@
     "vercel-build": "pnpm build",
     "lint": "eslint .",
     "self-check": "node scripts/self-check.mjs",
+    "check:large-analysis": "node --experimental-strip-types scripts/check-large-analysis.mjs",
     "check:pdf-text": "node scripts/check-pdf-text.mjs"
   },
   "dependencies": {
