@@ -38,7 +38,13 @@ type AnalyzeBody = {
   promptTemplate?: string;
   workPassword?: string;
   verifyPassword?: boolean;
+  chunkIndex?: number;
+  chunkCount?: number;
+  pageStart?: number;
+  pageEnd?: number;
 };
+
+const MAX_CHUNK_CHARACTERS = 100_000;
 
 function setCors(response: VercelResponse) {
   response.setHeader("Access-Control-Allow-Origin", "*");
@@ -185,12 +191,20 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const sourceName = normalizeString(body.sourceName) || "未命名PDF";
     const pageCount = Number(body.pageCount) || 0;
     const extractedText = normalizeString(body.extractedText);
+    const chunkIndex = Math.max(1, Number(body.chunkIndex) || 1);
+    const chunkCount = Math.max(chunkIndex, Number(body.chunkCount) || 1);
+    const pageStart = Math.max(1, Number(body.pageStart) || 1);
+    const pageEnd = Math.max(pageStart, Number(body.pageEnd) || pageCount || pageStart);
 
     console.log("[analyze] request started", {
       requestId,
       sourceName,
       pageCount,
       textLength: extractedText.length,
+      chunkIndex,
+      chunkCount,
+      pageStart,
+      pageEnd,
       model: normalizeString(body.model) || "deepseek-v4-flash",
     });
 
@@ -199,11 +213,23 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return;
     }
 
-    const prompt = fillPromptTemplate(body.promptTemplate || DEFAULT_USER_PROMPT_TEMPLATE, {
+    if (extractedText.length > MAX_CHUNK_CHARACTERS) {
+      response.status(413).json({
+        error: `单个分析分块过大（${extractedText.length} 字符），请刷新页面后重新分析`,
+        code: "CHUNK_TOO_LARGE",
+      });
+      return;
+    }
+
+    const basePrompt = fillPromptTemplate(body.promptTemplate || DEFAULT_USER_PROMPT_TEMPLATE, {
       sourceName,
       pageCount,
-      manualText: extractedText.slice(0, 180_000),
+      manualText: extractedText,
     });
+    const prompt =
+      chunkCount > 1
+        ? `${basePrompt}\n\n【分块分析要求】\n当前为第 ${chunkIndex}/${chunkCount} 个分块，覆盖 PAGE ${pageStart}-${pageEnd}。只依据当前分块提取，但必须完整列出当前分块内全部工具、材料、Expendable Parts 和 Referenced Information，不得因为项目位于文本末尾而省略。`
+        : basePrompt;
 
     const deepseekResponse = await fetch(DEEPSEEK_URL, {
       method: "POST",
@@ -219,6 +245,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         ],
         response_format: { type: "json_object" },
         temperature: 0.1,
+        max_tokens: 8192,
         thinking: { type: "disabled" },
       }),
       signal: AbortSignal.timeout(270_000),
@@ -238,9 +265,17 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return;
     }
 
-    const content = payload?.choices?.[0]?.message?.content;
+    const choice = payload?.choices?.[0];
+    const content = choice?.message?.content;
     if (typeof content !== "string" || !content.trim()) {
       response.status(502).json({ error: "DeepSeek 未返回可解析内容" });
+      return;
+    }
+    if (choice?.finish_reason === "length") {
+      response.status(422).json({
+        error: "模型输出达到长度上限，正在请求前端使用更小分块重试",
+        code: "OUTPUT_TRUNCATED",
+      });
       return;
     }
 
@@ -251,6 +286,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
       toolMaterials: analysis.toolMaterials.length,
       expendableParts: analysis.expendableParts.length,
       referencedInformation: analysis.referencedInformation.length,
+      chunkIndex,
+      chunkCount,
     });
     response.status(200).json({ analysis });
   } catch (error) {
