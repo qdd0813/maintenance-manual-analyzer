@@ -5,7 +5,8 @@ import jsPDF from "jspdf";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 import { createWorker } from "tesseract.js";
-import { analysisToMarkdown, emptyAnalysis, type ManualAnalysis } from "./report";
+import { createAnalysisChunks, type AnalysisChunk } from "./chunking";
+import { analysisToMarkdown, emptyAnalysis, mergeAnalyses, type ManualAnalysis } from "./report";
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from "../../shared/prompt";
 import "./app.css";
 
@@ -34,6 +35,7 @@ const PRODUCTION_API_URL = SAME_ORIGIN_API
   ? new URL("/api/analyze", window.location.origin).href
   : "https://api.qdddd.cc/api/analyze";
 const OCR_ASSET_ROOT = new URL(`${import.meta.env.BASE_URL}ocr/`, window.location.href);
+const ANALYSIS_CONCURRENCY = 2;
 
 const defaultConfig: AdminConfig = {
   apiUrl: PRODUCTION_API_URL,
@@ -227,49 +229,88 @@ function App() {
 
       failureStage = "后端分析";
       setStatus({ stage: "analyzing", message: "正在生成分析报告，请稍等…", progress: 0.95 });
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 285_000);
-      let response: Response;
-      try {
-        response = await fetch(config.apiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sourceName: file.name,
-            pageCount: extracted.pageCount,
-            extractedText: extracted.text,
-            model: config.model,
-            systemPrompt: config.systemPrompt,
-            promptTemplate: config.promptTemplate,
-            workPassword: submittedPassword,
-          }),
-          signal: controller.signal,
-        });
-      } finally {
-        window.clearTimeout(timeout);
-      }
+      const chunks = createAnalysisChunks(extracted.text);
+      const chunkResults = new Array<ManualAnalysis>(chunks.length);
+      let nextChunkIndex = 0;
+      let completedChunks = 0;
 
-      const responseText = await response.text();
-      let payload: { analysis?: ManualAnalysis; error?: string } = {};
-      try {
-        payload = JSON.parse(responseText);
-      } catch {
-        if (response.status === 504) {
-          throw new Error("分析时间超过服务器限制，请稍后重试；系统已保留本地提取文本。");
+      const analyzeChunk = async (chunk: AnalysisChunk, chunkIndex: number, retryDepth = 0): Promise<ManualAnalysis[]> => {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 285_000);
+        let response: Response;
+        try {
+          response = await fetch(config.apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sourceName: file.name,
+              pageCount: extracted.pageCount,
+              extractedText: chunk.text,
+              chunkIndex: chunkIndex + 1,
+              chunkCount: chunks.length,
+              pageStart: chunk.pageStart,
+              pageEnd: chunk.pageEnd,
+              model: config.model,
+              systemPrompt: config.systemPrompt,
+              promptTemplate: config.promptTemplate,
+              workPassword: submittedPassword,
+            }),
+            signal: controller.signal,
+          });
+        } finally {
+          window.clearTimeout(timeout);
         }
-        throw new Error(`分析服务返回异常（HTTP ${response.status || "未知"}），请稍后重试。`);
-      }
-      if (response.status === 401) {
-        setWorkPassword("");
-        setWorkPasswordError("工作密码不正确，请重新输入。");
-        setWorkPasswordOpen(true);
-        throw new Error(payload.error || "工作密码错误");
-      }
-      if (!response.ok) throw new Error(payload.error || `分析接口返回失败（HTTP ${response.status}）`);
-      if (!payload.analysis) throw new Error("分析服务未返回报告内容，请重试。");
 
-      setAnalysis(payload.analysis);
-      setMarkdown(analysisToMarkdown(payload.analysis));
+        const responseText = await response.text();
+        let payload: { analysis?: ManualAnalysis; error?: string; code?: string };
+        try {
+          payload = JSON.parse(responseText);
+        } catch {
+          if (response.status === 504) {
+            throw new Error(`第 ${chunkIndex + 1}/${chunks.length} 个分块分析超时，请稍后重试。`);
+          }
+          throw new Error(`分析服务返回异常（HTTP ${response.status || "未知"}），请稍后重试。`);
+        }
+        if (response.status === 401) {
+          setWorkPassword("");
+          setWorkPasswordError("工作密码不正确，请重新输入。");
+          setWorkPasswordOpen(true);
+          throw new Error(payload.error || "工作密码错误");
+        }
+        if (response.status === 422 && payload.code === "OUTPUT_TRUNCATED" && retryDepth < 3) {
+          const smallerChunks = createAnalysisChunks(chunk.text, Math.max(10_000, Math.floor(chunk.text.length / 2)));
+          if (smallerChunks.length > 1) {
+            const retriedResults: ManualAnalysis[] = [];
+            for (const smallerChunk of smallerChunks) {
+              retriedResults.push(...(await analyzeChunk(smallerChunk, chunkIndex, retryDepth + 1)));
+            }
+            return retriedResults;
+          }
+        }
+        if (!response.ok) throw new Error(payload.error || `分析接口返回失败（HTTP ${response.status}）`);
+        if (!payload.analysis) throw new Error("分析服务未返回报告内容，请重试。");
+        return [payload.analysis];
+      };
+
+      const workers = Array.from({ length: Math.min(ANALYSIS_CONCURRENCY, chunks.length) }, async () => {
+        while (nextChunkIndex < chunks.length) {
+          const chunkIndex = nextChunkIndex;
+          nextChunkIndex += 1;
+          const results = await analyzeChunk(chunks[chunkIndex], chunkIndex);
+          chunkResults[chunkIndex] = mergeAnalyses(results, file.name, extracted.pageCount);
+          completedChunks += 1;
+          setStatus({
+            stage: "analyzing",
+            message: `正在分析完整手册：已完成 ${completedChunks}/${chunks.length} 个分块`,
+            progress: 0.8 + (completedChunks / chunks.length) * 0.18,
+          });
+        }
+      });
+      await Promise.all(workers);
+
+      const mergedAnalysis = mergeAnalyses(chunkResults, file.name, extracted.pageCount);
+      setAnalysis(mergedAnalysis);
+      setMarkdown(analysisToMarkdown(mergedAnalysis));
       setStatus({ stage: "done", message: "分析完成，可以预览或下载 PDF。", progress: 1 });
     } catch (caught) {
       setStatus({ stage: "error", message: "分析失败", progress: 0 });
@@ -325,27 +366,29 @@ function App() {
 
   const downloadPdf = async () => {
     if (!reportRef.current) return;
-    const canvas = await html2canvas(reportRef.current, {
-      scale: 2,
-      backgroundColor: "#ffffff",
-      useCORS: true,
-      ignoreElements: (element) => element.classList.contains("noCapture"),
-    });
     const pdf = new jsPDF("p", "mm", "a4");
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const imgWidth = pageWidth;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    let heightLeft = imgHeight;
-    let position = 0;
+    const reportWidth = reportRef.current.scrollWidth;
+    const cssPageHeight = Math.max(1, Math.floor((reportWidth * pageHeight) / pageWidth));
+    const reportHeight = reportRef.current.scrollHeight;
 
-    pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+    for (let offset = 0, pageIndex = 0; offset < reportHeight; offset += cssPageHeight, pageIndex += 1) {
+      const sliceHeight = Math.min(cssPageHeight, reportHeight - offset);
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 1.5,
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        y: offset,
+        width: reportWidth,
+        height: sliceHeight,
+        windowWidth: reportWidth,
+        windowHeight: sliceHeight,
+        ignoreElements: (element) => element.classList.contains("noCapture"),
+      });
+      if (pageIndex > 0) pdf.addPage();
+      const imageHeight = (canvas.height * pageWidth) / canvas.width;
+      pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, pageWidth, imageHeight);
     }
 
     const blob = pdf.output("blob");
