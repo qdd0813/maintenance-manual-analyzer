@@ -1,4 +1,4 @@
-export const ANALYSIS_CHUNK_CHARACTERS = 60_000;
+export const ANALYSIS_CHUNK_CHARACTERS = 15_000;
 
 export type AnalysisChunk = {
   text: string;

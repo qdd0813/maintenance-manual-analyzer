@@ -277,8 +277,8 @@ function App() {
           setWorkPasswordOpen(true);
           throw new Error(payload.error || "工作密码错误");
         }
-        if (response.status === 422 && payload.code === "OUTPUT_TRUNCATED" && retryDepth < 3) {
-          const smallerChunks = createAnalysisChunks(chunk.text, Math.max(10_000, Math.floor(chunk.text.length / 2)));
+        if (response.status === 422 && payload.code === "OUTPUT_TRUNCATED" && retryDepth < 5) {
+          const smallerChunks = createAnalysisChunks(chunk.text, Math.max(2_500, Math.floor(chunk.text.length / 2)));
           if (smallerChunks.length > 1) {
             const retriedResults: ManualAnalysis[] = [];
             for (const smallerChunk of smallerChunks) {
@@ -286,6 +286,9 @@ function App() {
             }
             return retriedResults;
           }
+        }
+        if (response.status === 422 && payload.code === "OUTPUT_TRUNCATED") {
+          throw new Error("当前页面内容过密，自动细分后模型输出仍达到长度上限，请稍后重试。");
         }
         if (!response.ok) throw new Error(payload.error || `分析接口返回失败（HTTP ${response.status}）`);
         if (!payload.analysis) throw new Error("分析服务未返回报告内容，请重试。");
